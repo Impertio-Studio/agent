@@ -142,6 +142,26 @@ def get_timestamp():
         return str(datetime.utcnow())
 
 
+_SECRET_FLAGS = re.compile(
+    r"(?P<flag>(?:--(?:mariadb-root-password|admin-password|db-password|db-root-password|password)|-p)(?:=|\s+)?)(?P<val>(?:'[^']*'|\"[^\"]*\"|\S+))"
+)
+
+
+def mask_secrets_in_command(command):
+    """Impertio C20: never let a database or admin password reach the job log.
+
+    Masks the value after password flags in a command string or list before it is
+    logged; the command itself is executed unmasked by the caller."""
+    def mask(text: str) -> str:
+        return _SECRET_FLAGS.sub(lambda m: m.group("flag") + "***", text)
+
+    if isinstance(command, str):
+        return mask(command)
+    if isinstance(command, (list, tuple)):
+        return [mask(str(part)) for part in command]
+    return command
+
+
 def get_execution_result(
     command: str = "",
     directory: str = "",
@@ -150,7 +170,7 @@ def get_execution_result(
 ) -> ExecutionResult:
     """returns an ExecutionResult object to manage the output of a Job Step"""
     return {
-        "command": command,
+        "command": mask_secrets_in_command(command),
         "directory": directory,
         "start": start or datetime.now(),
         "status": status or "Running",
