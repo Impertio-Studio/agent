@@ -649,6 +649,9 @@ class Site(Base):
                 offsite["path"],
             )
             region = auth.get("REGION")
+            # Press sends ENDPOINT_URL for S3-compatible storage (Backup Bucket.endpoint_url);
+            # without it boto3 targets amazonaws.com and the upload fails on any other provider.
+            endpoint_url = auth.get("ENDPOINT_URL") or None
 
             if region:
                 s3 = boto3.client(
@@ -656,12 +659,14 @@ class Site(Base):
                     aws_access_key_id=auth["ACCESS_KEY"],
                     aws_secret_access_key=auth["SECRET_KEY"],
                     region_name=region,
+                    endpoint_url=endpoint_url,
                 )
             else:
                 s3 = boto3.client(
                     "s3",
                     aws_access_key_id=auth["ACCESS_KEY"],
                     aws_secret_access_key=auth["SECRET_KEY"],
+                    endpoint_url=endpoint_url,
                 )
 
             for backup_file in backup_files.values():
