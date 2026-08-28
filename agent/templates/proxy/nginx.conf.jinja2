@@ -31,12 +31,22 @@ map $host $subdomain_map {
 
 {% for name, upstream in upstreams.items() %}
 upstream {{ upstream["hash"] }} {
+	{%- if upstream["secondaries"]|length > 0 %}
+	{# Impertio C12: with a standby present, only mark the primary down after a few failures, and briefly #}
+	server {{ name }}:80 max_fails=3 fail_timeout=5s;
+	{%- else %}
 	server {{ name }}:80;
+	{%- endif %}
 
 	{% for secondary in upstream["secondaries"] %}
 
 		{% for ip, weight in secondary.items() %}
+			{%- if weight|int == 0 %}
+			{# Impertio C12: weight 0 means standby: only used when every primary is down #}
+			server {{ ip }}:80 backup;
+			{%- else %}
 			server {{ ip }}:80 weight={{ weight }};
+			{%- endif %}
 		{% endfor %}
 
 	{% endfor %}
