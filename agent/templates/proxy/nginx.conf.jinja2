@@ -213,6 +213,8 @@ server {
 
 	location /socket.io {
 		proxy_http_version 1.1;
+		proxy_next_upstream error timeout http_502;
+		proxy_next_upstream_tries 2;
 		proxy_set_header Upgrade $http_upgrade;
 		proxy_set_header Host $host;
 		proxy_set_header X-Real-IP $remote_addr;
@@ -227,6 +229,9 @@ server {
 
 	location / {
 		proxy_http_version 1.1;
+		{# Impertio C12b: with a standby behind the upstream, retry a request on a 502 from the primary too #}
+		proxy_next_upstream error timeout http_502;
+		proxy_next_upstream_tries 2;
 
 		proxy_read_timeout 600;
 		proxy_buffering off;

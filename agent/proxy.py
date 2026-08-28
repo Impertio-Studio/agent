@@ -429,6 +429,12 @@ class Proxy(Server):
                 continue
             hashed_upstream = sha(upstream.encode()).hexdigest()[:16]
             upstreams[upstream] = {"sites": [], "secondaries": [], "hash": hashed_upstream}
+            # Impertio C12b: a standby (every secondary at weight 0) is not auto-scaling. Sites in
+            # front of a standby keep using the regular upstream for websockets too, so the
+            # standby also carries socket.io traffic when the primary is down.
+            standby_only = bool(self.secondaries.get(upstream)) and all(
+                int(weight) == 0 for secondary in self.secondaries.get(upstream, []) for weight in secondary.values()
+            )
             for site in os.listdir(upstream_directory):
                 with open(os.path.join(upstream_directory, site)) as f:
                     status = f.read().strip()
@@ -445,7 +451,7 @@ class Proxy(Server):
                     {
                         "name": site,
                         "upstream": actual_upstream,
-                        "is_auto_scaled": bool(self.secondaries.get(upstream, False)),
+                        "is_auto_scaled": bool(self.secondaries.get(upstream, False)) and not standby_only,
                     }
                 )
 
