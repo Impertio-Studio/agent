@@ -440,6 +440,8 @@ class Bench(Base):
             if site_config:
                 site_config = json.loads(site_config)
                 site.update_config(site_config)
+            if self.server.config.get("proxysql_users"):
+                site.register_db_user_in_proxysql()
         finally:
             self.delete_downloaded_files(files["directory"])
         site.uninstall_unavailable_apps(apps)
