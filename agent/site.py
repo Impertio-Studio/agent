@@ -226,6 +226,12 @@ class Site(Base):
 
         return {"output": data}
 
+    @step("Register Site Database User in ProxySQL")
+    def register_db_user_in_proxysql(self):
+        """Impertio C11: see Bench.register_site_db_user_in_proxysql."""
+        config_path = os.path.join(self.directory, "site_config.json")
+        return self.execute(f"/usr/local/sbin/proxysql-site-gebruiker {config_path}")
+
     @job("Restore Site")
     def restore_job(
         self,
@@ -257,6 +263,8 @@ class Site(Base):
                     files["public"],
                     files["private"],
                 )
+                if self.bench.server.config.get("proxysql_users"):
+                    self.register_db_user_in_proxysql()
             else:
                 self.restore_files(
                     public_file=files["public"],

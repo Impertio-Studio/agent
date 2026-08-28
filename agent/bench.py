@@ -213,6 +213,15 @@ class Bench(Base):
         finally:
             self.drop_mariadb_user(name, mariadb_root_password, site_database)
 
+    @step("Register Site Database User in ProxySQL")
+    def register_site_db_user_in_proxysql(self, name):
+        """Impertio C11: when the app server talks to the database through ProxySQL,
+        every site database user must be known to ProxySQL before the site can connect.
+        Enabled by the agent config flag `proxysql_users`; the helper reads the credentials
+        from site_config.json itself, nothing secret passes through argv."""
+        config_path = os.path.join(self.sites_directory, name, "site_config.json")
+        return self.execute(f"/usr/local/sbin/proxysql-site-gebruiker {config_path}")
+
     @job("Create User", priority="high")
     def create_user(
         self,
@@ -385,6 +394,9 @@ class Bench(Base):
         create_user: dict | None = None,
     ):
         self.bench_new_site(name, mariadb_root_password, admin_password)
+
+        if self.server.config.get("proxysql_users"):
+            self.register_site_db_user_in_proxysql(name)
         site = Site(name, self)
         site.install_apps(apps)
         site.update_config(config)
