@@ -58,18 +58,62 @@ class TestBenchNewSiteThroughProxySQL(unittest.TestCase):
         self.assertEqual([c[0] for c in calls], ["docker", "drop"])
         self.assertNotIn("--db-password", calls[0][1])
 
-    def test_users_are_registered_before_bench_new_site_and_temp_user_removed_after(self):
+    def test_site_user_is_registered_before_bench_new_site(self):
         calls = self._run(proxysql_users=True)
-        self.assertEqual([c[0] for c in calls], ["execute", "execute", "docker", "drop", "execute"])
-        temp, site, docker, _drop, cleanup = calls
-        self.assertEqual(temp[1], "/usr/local/sbin/proxysql-site-gebruiker --stdin")
-        self.assertEqual(json.loads(temp[2]), {"db_user": "_abc123_limited", "db_password": "tmp-pw"})
+        self.assertEqual([c[0] for c in calls], ["execute", "docker", "drop"])
+        site, docker, _drop = calls
+        self.assertEqual(site[1], "/usr/local/sbin/proxysql-site-gebruiker --stdin")
         self.assertEqual(json.loads(site[2]), {"db_user": "_abc123", "db_password": "site-pw"})
         self.assertIn("--db-password site-pw ", docker[1])
         self.assertIn("--db-name _abc123 site.test", docker[1])
-        self.assertEqual(cleanup[1], "/usr/local/sbin/proxysql-site-gebruiker --verwijder _abc123_limited")
 
     def test_no_password_reaches_the_helper_through_argv(self):
         for kind, cmd, _ in self._run(proxysql_users=True):
             if kind == "execute":
                 self.assertNotIn("pw", cmd)
+
+
+class TestTemporaryUserThroughProxySQL(unittest.TestCase):
+    """Impertio C4: the temporary root-like user is registered in ProxySQL when it is created
+    and removed when it is dropped, so new site, restore and drop site all route through."""
+
+    def _bench(self, proxysql_users: bool) -> Bench:
+        bench = _bench(proxysql_users)
+        bench.host = "172.17.0.1"
+        bench.db_port = 6033
+        bench.sites_directory = "/tmp/bench"
+        return bench
+
+    def test_create_registers_and_drop_unregisters(self):
+        bench = self._bench(True)
+        calls: list[tuple[str, str | None]] = []
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(Bench, "get_random_string", return_value="tmp-pw"))
+            stack.enter_context(
+                patch.object(
+                    Bench, "execute", side_effect=lambda cmd, input=None, **k: calls.append((cmd, input))
+                )
+            )
+            database, user, _password = bench.create_mariadb_user("site.test", "root-pw")
+            bench.drop_mariadb_user("site.test", "root-pw", database)
+        self.assertEqual(user, f"{database}_limited")
+        registered = [c for c in calls if c[0] == "/usr/local/sbin/proxysql-site-gebruiker --stdin"]
+        self.assertEqual(json.loads(registered[0][1]), {"db_user": user, "db_password": "tmp-pw"})
+        self.assertIn((f"/usr/local/sbin/proxysql-site-gebruiker --verwijder {user}", None), calls)
+        # the registration happens after the user exists on the database, the removal after it is dropped
+        created_at = next(i for i, c in enumerate(calls) if "CREATE OR REPLACE USER" in c[0])
+        self.assertLess(created_at, calls.index(registered[0]))
+
+    def test_without_proxysql_no_helper_calls(self):
+        bench = self._bench(False)
+        calls: list[tuple[str, str | None]] = []
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(Bench, "get_random_string", return_value="tmp-pw"))
+            stack.enter_context(
+                patch.object(
+                    Bench, "execute", side_effect=lambda cmd, input=None, **k: calls.append((cmd, input))
+                )
+            )
+            database, _user, _password = bench.create_mariadb_user("site.test", "root-pw")
+            bench.drop_mariadb_user("site.test", "root-pw", database)
+        self.assertFalse([c for c in calls if "proxysql-site-gebruiker" in c[0]])

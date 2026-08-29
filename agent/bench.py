@@ -202,16 +202,14 @@ class Bench(Base):
     @step("New Site")
     def bench_new_site(self, name, mariadb_root_password, admin_password):
         site_database, temp_user, temp_password = self.create_mariadb_user(name, mariadb_root_password)
-        via_proxysql = bool(self.server.config.get("proxysql_users"))
         db_password_flag = ""
-        if via_proxysql:
+        if self.via_proxysql:
             # Impertio C4: through ProxySQL a connection is only routed for a user ProxySQL
-            # already knows. `bench new-site` connects as the temporary user and then as the
-            # new site user, before site_config.json exists, so both go into ProxySQL first.
-            # The site password is chosen here so it can be registered up front; it is
-            # passed to bench like the other secrets on this command line.
+            # already knows. The temporary user is registered by create_mariadb_user; the new
+            # site user connects during `bench new-site`, before site_config.json exists, so
+            # its password is chosen here and registered up front. It is passed to bench like
+            # the other secrets on this command line.
             site_password = self.get_random_string(32)
-            self.register_db_user_in_proxysql(temp_user, temp_password)
             self.register_db_user_in_proxysql(site_database, site_password)
             db_password_flag = f"--db-password {site_password} "
         try:
@@ -225,8 +223,11 @@ class Bench(Base):
             )
         finally:
             self.drop_mariadb_user(name, mariadb_root_password, site_database)
-            if via_proxysql:
-                self.unregister_db_user_in_proxysql(temp_user)
+
+    @property
+    def via_proxysql(self) -> bool:
+        """Impertio C4: the benches on this server reach their databases through ProxySQL."""
+        return bool(self.server.config.get("proxysql_users"))
 
     def register_db_user_in_proxysql(self, user, password):
         """Impertio C4: upsert one database user in ProxySQL before a site exists.
@@ -319,6 +320,10 @@ class Bench(Base):
         for query in queries:
             command = f'mysql -h {self.host} -P {self.db_port} -uroot -p{mariadb_root_password} -e "{query}"'
             self.execute(command)
+        if self.via_proxysql:
+            # Impertio C4: every path that logs in as this temporary user (new site, restore,
+            # drop site) goes through ProxySQL, which only routes users it knows.
+            self.register_db_user_in_proxysql(user, password)
         return database, user, password
 
     def drop_mariadb_user(self, site, mariadb_root_password, database=None):
@@ -332,6 +337,8 @@ class Bench(Base):
         for query in queries:
             command = f'mysql -h {self.host} -P {self.db_port} -uroot -p{mariadb_root_password} -e "{query}"'
             self.execute(command)
+        if self.via_proxysql:
+            self.unregister_db_user_in_proxysql(user)
 
     def fetch_monitor_data(self):
         lines = []
