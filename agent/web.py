@@ -1281,6 +1281,14 @@ def update_monitor_rules():
     return {}
 
 
+def database_port(data: dict) -> int:
+    """Port of the database server a job must reach (Impertio C4).
+
+    Press sends db_port next to private_ip; an older Press sends only private_ip, which
+    means the default MariaDB port."""
+    return int(data.get("db_port") or 3306)
+
+
 @application.route("/database/physical-backup", methods=["POST"])
 def physical_backup_database():
     data = request.json
@@ -1288,6 +1296,7 @@ def physical_backup_database():
         databases=data["databases"],
         db_user="root",
         db_host=data["private_ip"],
+        db_port=database_port(data),
         db_password=data["mariadb_root_password"],
         site_backup_name=data["site_backup"]["name"],
         snapshot_trigger_url=data["site_backup"]["snapshot_trigger_url"],
@@ -1303,7 +1312,7 @@ def physical_restore_database():
         backup_db=data["backup_db"],
         target_db=data["target_db"],
         target_db_root_password=data["target_db_root_password"],
-        target_db_port=3306,
+        target_db_port=database_port(data),
         target_db_host=data["private_ip"],
         backup_db_base_directory=data.get("backup_db_base_directory", ""),
         restore_specific_tables=data.get("restore_specific_tables", False),

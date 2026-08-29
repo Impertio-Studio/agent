@@ -202,16 +202,43 @@ class Bench(Base):
     @step("New Site")
     def bench_new_site(self, name, mariadb_root_password, admin_password):
         site_database, temp_user, temp_password = self.create_mariadb_user(name, mariadb_root_password)
+        via_proxysql = bool(self.server.config.get("proxysql_users"))
+        db_password_flag = ""
+        if via_proxysql:
+            # Impertio C4: through ProxySQL a connection is only routed for a user ProxySQL
+            # already knows. `bench new-site` connects as the temporary user and then as the
+            # new site user, before site_config.json exists, so both go into ProxySQL first.
+            # The site password is chosen here so it can be registered up front; it is
+            # passed to bench like the other secrets on this command line.
+            site_password = self.get_random_string(32)
+            self.register_db_user_in_proxysql(temp_user, temp_password)
+            self.register_db_user_in_proxysql(site_database, site_password)
+            db_password_flag = f"--db-password {site_password} "
         try:
             return self.docker_execute(
                 f"bench new-site --no-mariadb-socket "
                 f"--mariadb-root-username {temp_user} "
                 f"--mariadb-root-password {temp_password} "
                 f"--admin-password {admin_password} "
+                f"{db_password_flag}"
                 f"--db-name {site_database} {name}"
             )
         finally:
             self.drop_mariadb_user(name, mariadb_root_password, site_database)
+            if via_proxysql:
+                self.unregister_db_user_in_proxysql(temp_user)
+
+    def register_db_user_in_proxysql(self, user, password):
+        """Impertio C4: upsert one database user in ProxySQL before a site exists.
+        Credentials go to the helper on stdin, never through argv."""
+        return self.execute(
+            "/usr/local/sbin/proxysql-site-gebruiker --stdin",
+            input=json.dumps({"db_user": user, "db_password": password}),
+        )
+
+    def unregister_db_user_in_proxysql(self, user):
+        """Impertio C4: remove a temporary user from ProxySQL once `bench new-site` is done."""
+        return self.execute(f"/usr/local/sbin/proxysql-site-gebruiker --verwijder {user}")
 
     @step("Register Site Database User in ProxySQL")
     def register_site_db_user_in_proxysql(self, name):
