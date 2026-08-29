@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import os
-import shutil
 
 from agent.job import job, step
 from agent.server import Server
 
-PROXYSQL_CONFIG = "/etc/proxysql.cnf"
+PROXYSQL_WRITER = "/usr/local/sbin/proxysql-configuratie"
 ADMIN_DEFAULTS = "/etc/proxysql-admin-tijdelijk.cnf"
 
 
@@ -36,15 +35,14 @@ class ProxySQL(Server):
 
     @step("Write ProxySQL Configuration")
     def write_config(self, config: str):
-        pad = PROXYSQL_CONFIG
-        if os.path.exists(pad):
-            shutil.copy2(pad, pad + ".vorige")
-        with open(pad + ".nieuw", "w") as f:
-            f.write(config)
-        os.chmod(pad + ".nieuw", 0o600)
-        shutil.chown(pad + ".nieuw", user="proxysql", group="proxysql")
-        os.replace(pad + ".nieuw", pad)
-        return {"bytes": len(config), "vorige_bewaard": os.path.exists(pad + ".vorige")}
+        """Hand the rendered configuration to the small root helper that places it.
+
+        The file carries the admin password and the password of every site, so it stays 0600 and owned by
+        proxysql; this agent runs as an unprivileged user and cannot write it. One narrow sudo rule covers
+        exactly that helper (measured on the application server on 29-08: without it the job fails with
+        PermissionError on /etc/proxysql.cnf). The configuration goes in on stdin, never through argv,
+        because everything on the command line ends up in the process list and in the job log."""
+        return self.execute(f"sudo -n {PROXYSQL_WRITER}", input=config)
 
     @step("Load ProxySQL Configuration")
     def load_config(self, admin_credentials: str):

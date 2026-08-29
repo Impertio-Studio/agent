@@ -20,23 +20,25 @@ class TestConfigureProxySQL(unittest.TestCase):
         p.server = SimpleNamespace(config={}, step_record=MagicMock(), job_record=MagicMock())
         return p
 
-    def test_write_config_writes_atomically_and_keeps_the_previous_file(self):
+    def test_write_config_goes_through_the_root_helper_on_stdin(self):
+        """Het bestand is 0600 van proxysql; de agent draait onbevoegd en geeft de configuratie door.
+
+        Gemeten op de applicatiemachine 29-08: zonder deze weg faalt de baan met PermissionError op
+        /etc/proxysql.cnf, want de agent draait als frappe."""
         p = self._proxysql()
-        with tempfile.TemporaryDirectory() as d:
-            pad = os.path.join(d, "proxysql.cnf")
-            with open(pad, "w") as f:
-                f.write("oude configuratie")
-            with ExitStack() as stack:
-                stack.enter_context(patch("agent.proxysql.PROXYSQL_CONFIG", pad))
-                stack.enter_context(patch("agent.proxysql.os.chmod"))
-                stack.enter_context(patch("agent.proxysql.shutil.chown"))
-                uit = ProxySQL.write_config.__wrapped__(p, "nieuwe configuratie")
-            with open(pad) as f:
-                self.assertEqual(f.read(), "nieuwe configuratie")
-            with open(pad + ".vorige") as f:
-                self.assertEqual(f.read(), "oude configuratie", "de vorige configuratie moet bewaard blijven")
-            self.assertFalse(os.path.exists(pad + ".nieuw"), "het tijdelijke bestand moet zijn hernoemd")
-            self.assertEqual(uit["bytes"], len("nieuwe configuratie"))
+        gezien = {}
+
+        def nep_execute(command, *a, **k):
+            gezien["command"] = command
+            gezien["input"] = k.get("input")
+            return {"output": ""}
+
+        with patch.object(ProxySQL, "execute", side_effect=nep_execute):
+            ProxySQL.write_config.__wrapped__(p, "nieuwe configuratie met GEHEIM erin")
+
+        self.assertIn("sudo -n /usr/local/sbin/proxysql-configuratie", gezien["command"])
+        self.assertEqual(gezien["input"], "nieuwe configuratie met GEHEIM erin")
+        self.assertNotIn("GEHEIM", gezien["command"], "de configuratie mag niet in de opdrachtregel staan")
 
     def test_load_config_uses_a_defaults_file_and_removes_it(self):
         p = self._proxysql()
