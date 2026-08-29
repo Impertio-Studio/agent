@@ -72,10 +72,42 @@ class TestConfigureProxySQL(unittest.TestCase):
             verwijderd, ["/etc/proxysql-admin-tijdelijk.cnf"], "het aanmeldbestand moet na afloop weg zijn"
         )
         self.assertEqual(
-            len(commands), 9, "drie keer laden uit config, drie keer naar runtime, drie keer opslaan"
+            len(commands),
+            12,
+            "drie keer legen, drie keer laden uit config, drie keer naar runtime, drie keer opslaan",
         )
         for c in commands:
             self.assertNotIn("GEHEIM", c, "het wachtwoord mag niet in de opdrachtregel staan")
             self.assertIn("--defaults-file=", c)
         self.assertIn("LOAD MYSQL SERVERS FROM CONFIG", " ".join(commands))
         self.assertIn("SAVE MYSQL USERS TO DISK", " ".join(commands))
+
+    def test_load_config_empties_the_tables_before_it_fills_them(self):
+        """Zonder legen houdt een gebruiker die Press niet meer stuurt zijn toegang (gemeten op de gateway)."""
+        p = self._proxysql()
+        commands: list[str] = []
+
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch.object(ProxySQL, "execute", side_effect=lambda c, *a, **k: commands.append(c))
+            )
+            echte_open = os.open
+
+            def nep_open(pad, vlaggen, modus=0o777):
+                return echte_open(
+                    os.path.join(tempfile.gettempdir(), "proxysql-admin-toets.cnf"), vlaggen, modus
+                )
+
+            stack.enter_context(patch("agent.proxysql.os.open", side_effect=nep_open))
+            stack.enter_context(patch("agent.proxysql.os.path.exists", return_value=True))
+            stack.enter_context(patch("agent.proxysql.os.unlink"))
+            ProxySQL.load_config.__wrapped__(p, "admin:GEHEIM")
+
+        for tabel in ("mysql_users", "mysql_servers", "mysql_galera_hostgroups"):
+            legen = next(i for i, c in enumerate(commands) if f"DELETE FROM {tabel}" in c)
+            laden = next(i for i, c in enumerate(commands) if "FROM CONFIG" in c)
+            naar_runtime = next(i for i, c in enumerate(commands) if "TO RUNTIME" in c)
+            self.assertLess(legen, laden, f"{tabel} moet leeg zijn voordat de configuratie erin gaat")
+            self.assertLess(
+                legen, naar_runtime, f"{tabel} mag pas naar de runtime nadat hij opnieuw gevuld is"
+            )

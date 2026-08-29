@@ -50,11 +50,19 @@ class ProxySQL(Server):
     def load_config(self, admin_credentials: str):
         """Read the file into the runtime and save it to the internal database, so a restart keeps it.
 
+        The configuration Press sends is the whole truth, so the tables are emptied before they are filled.
         The admin credentials go through a 0600 defaults file, never through the command line,
         because everything on the command line ends up in the process list and in the job log."""
         gebruiker, _, wachtwoord = admin_credentials.partition(":")
         defaults = ADMIN_DEFAULTS
         commands = [
+            # FROM CONFIG only adds and overwrites; it never removes. Without emptying the tables first, a user
+            # or a node that Press no longer sends keeps its access forever (measured on the gateway, 29-08-2026).
+            # The emptying happens in the memory tables, so the running gateway notices nothing until
+            # LOAD ... TO RUNTIME below; there is no moment without users or servers.
+            "DELETE FROM mysql_users",
+            "DELETE FROM mysql_servers",
+            "DELETE FROM mysql_galera_hostgroups",
             "LOAD MYSQL VARIABLES FROM CONFIG",
             "LOAD MYSQL SERVERS FROM CONFIG",
             "LOAD MYSQL USERS FROM CONFIG",
