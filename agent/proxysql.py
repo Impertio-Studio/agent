@@ -6,7 +6,7 @@ from agent.job import job, step
 from agent.server import Server
 
 PROXYSQL_WRITER = "/usr/local/sbin/proxysql-configuratie"
-ADMIN_DEFAULTS = "/etc/proxysql-admin-tijdelijk.cnf"
+ADMIN_DEFAULTS_NAAM = "proxysql-admin-tijdelijk.cnf"
 
 
 class ProxySQL(Server):
@@ -52,7 +52,9 @@ class ProxySQL(Server):
         The admin credentials go through a 0600 defaults file, never through the command line,
         because everything on the command line ends up in the process list and in the job log."""
         gebruiker, _, wachtwoord = admin_credentials.partition(":")
-        defaults = ADMIN_DEFAULTS
+        # In de eigen map van de agent, niet in /etc: die map is van het systeem en deze dienst draait
+        # onbevoegd. Het bestand bestaat alleen tijdens de negen opdrachten en is 0600.
+        defaults = os.path.join(self.directory, ADMIN_DEFAULTS_NAAM)
         commands = [
             # FROM CONFIG only adds and overwrites; it never removes. Without emptying the tables first, a user
             # or a node that Press no longer sends keeps its access forever (measured on the gateway, 29-08-2026).

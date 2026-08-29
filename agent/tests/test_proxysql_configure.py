@@ -48,7 +48,7 @@ class TestConfigureProxySQL(unittest.TestCase):
         def nep_execute(command, *a, **k):
             commands.append(command)
             # het bestand moet bestaan terwijl de opdrachten draaien
-            gemaakt["bestond"] = os.path.exists("/etc/proxysql-admin-tijdelijk.cnf")
+            gemaakt["bestond"] = os.path.exists(os.path.join(p.directory, "proxysql-admin-tijdelijk.cnf"))
             return {"output": ""}
 
         with ExitStack() as stack:
@@ -64,14 +64,18 @@ class TestConfigureProxySQL(unittest.TestCase):
 
             stack.enter_context(patch("agent.proxysql.os.open", side_effect=nep_open))
             stack.enter_context(patch("agent.proxysql.os.path.exists", return_value=True))
-            stack.enter_context(patch("agent.proxysql.ADMIN_DEFAULTS", "/etc/proxysql-admin-tijdelijk.cnf"))
             verwijderd = []
             stack.enter_context(patch("agent.proxysql.os.unlink", side_effect=verwijderd.append))
             ProxySQL.load_config.__wrapped__(p, "admin:GEHEIM")
 
         self.assertEqual(geopend["modus"], 0o600, "het aanmeldbestand moet 600 zijn")
         self.assertEqual(
-            verwijderd, ["/etc/proxysql-admin-tijdelijk.cnf"], "het aanmeldbestand moet na afloop weg zijn"
+            verwijderd,
+            [os.path.join(p.directory, "proxysql-admin-tijdelijk.cnf")],
+            "het aanmeldbestand moet na afloop weg zijn",
+        )
+        self.assertFalse(
+            geopend["pad"].startswith("/etc/"), "het aanmeldbestand hoort in de map van de agent, niet in /etc"
         )
         self.assertEqual(
             len(commands),
