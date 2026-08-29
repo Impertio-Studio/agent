@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import os
+import shutil
+
 from agent.job import job, step
 from agent.server import Server
+
+PROXYSQL_CONFIG = "/etc/proxysql.cnf"
+ADMIN_DEFAULTS = "/etc/proxysql-admin-tijdelijk.cnf"
 
 
 class ProxySQL(Server):
@@ -17,6 +23,58 @@ class ProxySQL(Server):
             f"--disable-column-names -e '{command}'"
         )
         return self.execute(command)
+
+    @job("Configure ProxySQL")
+    def configure_job(self, config: str, admin_credentials: str):
+        """Impertio C4: write the gateway configuration that Press rendered and load it into the runtime.
+
+        Press is the source; this machine only receives the finished file. The old file is kept
+        next to the new one so a change can be undone by hand, and the runtime is loaded from the
+        configuration file itself, so that what runs equals what was written."""
+        self.write_config(config)
+        self.load_config(admin_credentials)
+
+    @step("Write ProxySQL Configuration")
+    def write_config(self, config: str):
+        pad = PROXYSQL_CONFIG
+        if os.path.exists(pad):
+            shutil.copy2(pad, pad + ".vorige")
+        with open(pad + ".nieuw", "w") as f:
+            f.write(config)
+        os.chmod(pad + ".nieuw", 0o600)
+        shutil.chown(pad + ".nieuw", user="proxysql", group="proxysql")
+        os.replace(pad + ".nieuw", pad)
+        return {"bytes": len(config), "vorige_bewaard": os.path.exists(pad + ".vorige")}
+
+    @step("Load ProxySQL Configuration")
+    def load_config(self, admin_credentials: str):
+        """Read the file into the runtime and save it to the internal database, so a restart keeps it.
+
+        The admin credentials go through a 0600 defaults file, never through the command line,
+        because everything on the command line ends up in the process list and in the job log."""
+        gebruiker, _, wachtwoord = admin_credentials.partition(":")
+        defaults = ADMIN_DEFAULTS
+        commands = [
+            "LOAD MYSQL VARIABLES FROM CONFIG",
+            "LOAD MYSQL SERVERS FROM CONFIG",
+            "LOAD MYSQL USERS FROM CONFIG",
+            "LOAD MYSQL VARIABLES TO RUNTIME",
+            "LOAD MYSQL SERVERS TO RUNTIME",
+            "LOAD MYSQL USERS TO RUNTIME",
+            "SAVE MYSQL VARIABLES TO DISK",
+            "SAVE MYSQL SERVERS TO DISK",
+            "SAVE MYSQL USERS TO DISK",
+        ]
+        fd = os.open(defaults, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(f"[client]\nuser={gebruiker}\npassword={wachtwoord}\nhost=127.0.0.1\nport=6032\n")
+            for command in commands:
+                self.execute(f"mysql --defaults-file={defaults} --disable-column-names -e '{command}'")
+        finally:
+            if os.path.exists(defaults):
+                os.unlink(defaults)
+        return {"opdrachten": len(commands)}
 
     @job("Add User to ProxySQL")
     def add_user_job(

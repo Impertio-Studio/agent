@@ -282,6 +282,14 @@ def restart_nginx():
     return {"job": job}
 
 
+@application.route("/proxysql/configure", methods=["POST"])
+def configure_proxysql():
+    """Impertio C4: the gateway configuration as Press rendered it."""
+    data = request.json
+    job = ProxySQL().configure_job(config=data["config"], admin_credentials=data["admin_credentials"])
+    return {"job": job}
+
+
 @application.route("/proxy/reload", methods=["POST"])
 def reload_nginx():
     job = Proxy().reload_nginx_job()
