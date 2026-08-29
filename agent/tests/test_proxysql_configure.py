@@ -113,3 +113,18 @@ class TestConfigureProxySQL(unittest.TestCase):
             self.assertLess(
                 legen, naar_runtime, f"{tabel} mag pas naar de runtime nadat hij opnieuw gevuld is"
             )
+
+
+class TestServerExecuteContract(unittest.TestCase):
+	"""De wikkel op Server mocht stdin niet laten vallen.
+
+	Gemeten op de applicatiemachine 29-08: de baan faalde met "Server.execute() got an unexpected keyword
+	argument 'input'", terwijl de basisklasse stdin wel kent. Een wikkel die de API van zijn basis versmalt
+	breekt elke aanroeper die het weggelaten deel nodig heeft."""
+
+	def test_server_execute_geeft_stdin_door(self):
+		import inspect
+
+		from agent.server import Server
+
+		self.assertIn("input", inspect.signature(Server.execute).parameters)

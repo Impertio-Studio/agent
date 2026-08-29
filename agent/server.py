@@ -725,10 +725,11 @@ class Server(Base):
             shutil.move(destination, archived_site_path)
         shutil.move(site.directory, target.sites_directory)
 
-    def execute(self, command, directory=None, skip_output_log=False, non_zero_throw=True):
+    def execute(self, command, directory=None, input=None, skip_output_log=False, non_zero_throw=True):
         return super().execute(
             command,
             directory=directory,
+            input=input,
             skip_output_log=skip_output_log,
             non_zero_throw=non_zero_throw,
         )
